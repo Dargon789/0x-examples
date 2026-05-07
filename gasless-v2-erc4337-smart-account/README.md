@@ -7,7 +7,7 @@ Raw ERC-4337 signatures are accepted by the Gasless API via EIP-1271: instead of
 Demonstrates the following on Base mainnet:
 
 1. Create an ERC-4337 Modular Account v2 smart wallet via Alchemy Account Kit
-2. Deploy the smart wallet on first use (counterfactual deployment via UserOperation)
+2. Deploy the smart wallet automatically on first use via UserOperation
 3. Get a gasless quote (sell 1 USDC → buy WETH) using `/gasless/quote`
 4. Sign the gasless approval object with the smart wallet (`signatureType: 5`)
 5. Sign the trade object with the smart wallet (`signatureType: 5`)

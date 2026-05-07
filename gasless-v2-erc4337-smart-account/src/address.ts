@@ -19,7 +19,7 @@ async function main() {
   });
 
   console.log("Smart wallet address (MAv2):", client.account.address);
-  console.log("\nThis is a counterfactual address — the contract deploys on first use.");
+  console.log("\nThis address exists before the contract is deployed — fund it now, and the contract deploys automatically on first use.");
   console.log("\nFund this address on Base with:");
   console.log("  - 1 USDC (to sell)");
   console.log("  - ~0.005 ETH (covers deployment + one-time Permit2 approval)");
