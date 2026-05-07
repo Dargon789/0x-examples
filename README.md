@@ -37,6 +37,7 @@ A collection of 0x API code examples
 
 ### Gasless API
 - [Headless Example](https://github.com/0xProject/0x-examples/blob/main/gasless-v2-headless-example/README.md) — Command-line example
+- [ERC-4337 Smart Account](https://github.com/0xProject/0x-examples/tree/main/gasless-v2-erc4337-smart-account) — Gasless swaps from an ERC-4337 smart wallet (Alchemy Modular Account v2) using EIP-1271 raw signatures
 - [Trading Bot](https://github.com/0xProject/0x-examples/tree/main/gasless-v2-trading-bot) — Simple trading bot script with Gasless API v2  
 
 
