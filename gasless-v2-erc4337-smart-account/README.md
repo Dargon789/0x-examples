@@ -1,6 +1,6 @@
-# Gasless API v2 — ERC-4337 Smart Account (Alchemy)
+# Gasless API v2 — ERC-4337 Smart Account
 
-A headless example of using the [0x Gasless API v2](https://0x.org/docs/gasless-api/introduction) with an **ERC-4337 smart wallet** (Alchemy [Modular Account v2](https://accountkit.alchemy.com/)).
+A headless example of using the [0x Gasless API v2](https://0x.org/docs/gasless-api/introduction) with an **ERC-4337 smart wallet** (e.g. Alchemy [Modular Account v2](https://accountkit.alchemy.com/)).
 
 Raw ERC-4337 signatures are accepted by the Gasless API via EIP-1271: instead of splitting an EOA signature into `r`/`s`/`v`, the smart wallet's packed signature bytes are submitted directly using `signatureType: 5` (Raw). The 0x settlement contract calls `isValidSignature()` on the smart wallet contract to verify them.
 
