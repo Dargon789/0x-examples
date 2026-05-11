@@ -19,7 +19,6 @@ if (!ALCHEMY_API_KEY) throw new Error("missing ALCHEMY_API_KEY");
 
 const USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" as const;
 const WETH = "0x4200000000000000000000000000000000000006" as const;
-const PERMIT2 = "0x000000000022D473030F116dDEE9F6B43aC78BA3" as const;
 const SELL_AMOUNT = parseUnits("1", 6); // 1 USDC
 
 const headers = {
@@ -57,50 +56,10 @@ async function main() {
     transport: http(`https://base-mainnet.g.alchemy.com/v2/${ALCHEMY_API_KEY}`),
   });
 
-  // 2. Deploy smart wallet if needed — 0x needs to call isValidSignature() on-chain
+  // 2. Check if smart wallet is deployed — 0x needs to call isValidSignature() on-chain
   const deployedCode = await publicClient.getCode({ address: smartWalletAddress });
-  if (!deployedCode || deployedCode === "0x") {
-    console.log("Deploying smart wallet + approving Permit2...");
-    const { hash } = await client.sendUserOperation({
-      uo: {
-        target: USDC,
-        data: encodeFunctionData({
-          abi: erc20Abi,
-          functionName: "approve",
-          args: [PERMIT2, maxUint256],
-        }),
-        value: 0n,
-      },
-    });
-    const receipt = await client.waitForUserOperationTransaction({ hash });
-    console.log("Deployed:", receipt, "\n");
-  } else {
-    console.log("Smart wallet already deployed.\n");
-
-    const permit2Allowance = await publicClient.readContract({
-      address: USDC,
-      abi: erc20Abi,
-      functionName: "allowance",
-      args: [smartWalletAddress, PERMIT2],
-    });
-
-    if (permit2Allowance < SELL_AMOUNT) {
-      console.log("Approving Permit2...");
-      const { hash } = await client.sendUserOperation({
-        uo: {
-          target: USDC,
-          data: encodeFunctionData({
-            abi: erc20Abi,
-            functionName: "approve",
-            args: [PERMIT2, maxUint256],
-          }),
-          value: 0n,
-        },
-      });
-      const receipt = await client.waitForUserOperationTransaction({ hash });
-      console.log("Permit2 approved:", receipt, "\n");
-    }
-  }
+  const isDeployed = !!deployedCode && deployedCode !== "0x";
+  console.log("Smart wallet deployed:", isDeployed, "\n");
 
   // 3. Check USDC balance
   const usdcBalance = await publicClient.readContract({
@@ -132,33 +91,34 @@ async function main() {
   );
   console.log("Buy amount:", quote.buyAmount);
   console.log("Min buy amount:", quote.minBuyAmount);
-  console.log("Approval needed:", quote.issues?.allowance != null);
-  console.log("Gasless approval available:", quote.approval != null, "\n");
 
-  // 5. Sign approval (if needed) and trade
-  //    signatureType 5 = Raw: passes bytes directly to EIP-1271 isValidSignature()
-  let approvalDataToSubmit: object | undefined;
+  const tokenApprovalRequired = quote.issues?.allowance != null;
+  const gaslessApprovalAvailable = quote.approval != null;
 
-  if (quote.issues?.allowance != null) {
-    if (quote.approval != null) {
-      console.log("Signing gasless approval...");
-      const approvalSig = await client.signTypedData({
-        typedData: {
-          types: quote.approval.eip712.types,
-          domain: quote.approval.eip712.domain,
-          message: quote.approval.eip712.message,
-          primaryType: quote.approval.eip712.primaryType,
-        },
-      });
-      approvalDataToSubmit = {
-        type: quote.approval.type,
-        eip712: quote.approval.eip712,
-        signature: { signatureType: 5, signatureBytes: approvalSig },
-      };
+  console.log("Approval required:", tokenApprovalRequired);
+  console.log("Gasless approval available:", gaslessApprovalAvailable, "\n");
+
+  // 5. Deploy smart wallet and/or approve on-chain if needed
+  //    If gasless approval is available the relayer handles it; no UserOperation required here.
+  //    If the wallet isn't deployed yet we must trigger deployment before submitting, because
+  //    0x calls isValidSignature() on-chain and the contract must exist.
+  if (!isDeployed || (tokenApprovalRequired && !gaslessApprovalAvailable)) {
+    const needsOnChainApproval = tokenApprovalRequired && !gaslessApprovalAvailable;
+
+    if (!isDeployed) {
+      console.log(
+        needsOnChainApproval
+          ? "Deploying smart wallet + approving on-chain..."
+          : "Deploying smart wallet..."
+      );
     } else {
       console.log("Gasless approval unavailable — using on-chain approval...");
-      const { hash } = await client.sendUserOperation({
-        uo: {
+    }
+
+    // Bundle deployment + approval when both are needed (free atomicity from ERC-4337).
+    // If only deployment is needed, send a no-op call to trigger the factory.
+    const uo = needsOnChainApproval
+      ? {
           target: USDC,
           data: encodeFunctionData({
             abi: erc20Abi,
@@ -166,14 +126,36 @@ async function main() {
             args: [quote.issues.allowance.spender, maxUint256],
           }),
           value: 0n,
-        },
-      });
-      await client.waitForUserOperationTransaction({ hash });
-      console.log("On-chain approval confirmed.\n");
-    }
+        }
+      : { target: smartWalletAddress, data: "0x" as Hex, value: 0n };
+
+    const { hash } = await client.sendUserOperation({ uo });
+    const receipt = await client.waitForUserOperationTransaction({ hash });
+    console.log("Done:", receipt, "\n");
   }
 
-  console.log("Signing trade...");
+  // 6. Sign approval (if needed) and trade
+  //    signatureType 5 = Raw: passes bytes directly to EIP-1271 isValidSignature()
+  let approvalDataToSubmit: object | undefined;
+
+  if (tokenApprovalRequired && gaslessApprovalAvailable) {
+    console.log("Signing gasless approval...");
+    const approvalSig = await client.signTypedData({
+      typedData: {
+        types: quote.approval.eip712.types,
+        domain: quote.approval.eip712.domain,
+        message: quote.approval.eip712.message,
+        primaryType: quote.approval.eip712.primaryType,
+      },
+    });
+    approvalDataToSubmit = {
+      type: quote.approval.type,
+      eip712: quote.approval.eip712,
+      signature: { signatureType: 5, signatureBytes: approvalSig },
+    };
+  }
+
+  console.log("Signing trade...\n");
   const tradeSig = await client.signTypedData({
     typedData: {
       types: quote.trade.eip712.types,
@@ -188,7 +170,7 @@ async function main() {
     signature: { signatureType: 5, signatureBytes: tradeSig },
   };
 
-  // 6. Submit gasless swap
+  // 7. Submit gasless swap
   console.log("\nSubmitting gasless swap...\n");
   const submitBody: Record<string, unknown> = {
     trade: tradeDataToSubmit,
@@ -207,7 +189,7 @@ async function main() {
   );
   console.log("Trade hash:", tradeHash);
 
-  // 7. Poll for status
+  // 8. Poll for status
   console.log("\nPolling for status...\n");
   for (let i = 0; i < 20; i++) {
     await new Promise((r) => setTimeout(r, 3000));
